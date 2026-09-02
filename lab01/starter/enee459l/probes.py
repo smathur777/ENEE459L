@@ -104,7 +104,11 @@ def probe_module_model(root: Path = Path("/")) -> dict[str, Any]:
     # Return {'value': <the string>, 'source': src, 'status': 'ok'},
     # or unknown(src, <why>) if the node is not there.
     src = "/proc/device-tree/model"
-    raise NotImplementedError("probes.probe_module_model")
+    node = read_text(root)
+    if (node):
+        return {'value': node, 'source': src, 'status': 'ok'}
+    return unknown(src, "Node is not at source.")
+    
 
 
 def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
@@ -121,7 +125,7 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
     # Anchor your match to the start of a line, and return an int of kB,
     # not the string and not the whole line.
     src = "/proc/meminfo"
-    raise NotImplementedError("probes.probe_memory_total_kb")
+    
 
 
 def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
