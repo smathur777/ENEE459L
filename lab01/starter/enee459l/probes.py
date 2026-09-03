@@ -97,17 +97,11 @@ def probe_module_model(root: Path = Path("/")) -> dict[str, Any]:
     it comes from the hardware description the bootloader handed the kernel,
     not from anything installed afterwards.
     """
-
-    # TODO: implement this probe.
-    # Read /proc/device-tree/model with the read_text helper.
-    # That node is NUL-terminated; read_text already strips it for you.
-    # Return {'value': <the string>, 'source': src, 'status': 'ok'},
-    # or unknown(src, <why>) if the node is not there.
     src = "/proc/device-tree/model"
-    node = read_text(root)
-    if (node):
-        return {'value': node, 'source': src, 'status': 'ok'}
-    return unknown(src, "Node is not at source.")
+    node = read_text(root, src)
+    if node is None:
+        return unknown(src, "/proc/device-tree/model not found")
+    return {"value": node, "source": src, "status": "ok"}
     
 
 
@@ -119,12 +113,15 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
     ever sees the pool. Students are expected to notice and to explain it in
     their report rather than round it up.
     """
-
-    # TODO: implement this probe.
-    # Read /proc/meminfo and find the MemTotal line.
-    # Anchor your match to the start of a line, and return an int of kB,
-    # not the string and not the whole line.
     src = "/proc/meminfo"
+    meminfo = read_text(root, src)
+    if meminfo is None:
+        return unknown(src, "meminfo was not found")
+    # non capture match on start of string or new line and capture the integer values preceded by spaces
+    match = re.search(r"(?:^|\n)MemTotal:\s+(\d+)\s+kB\b", meminfo)
+    if match is None:
+        return unknown(src, "MemTotal was not found in meminfo")
+    return {"value": int(match.group(1)), "source": src, "status": "ok"}
     
 
 
@@ -151,7 +148,10 @@ def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
     #     'other'              anything else, e.g. a tmpfs or NFS root
     # The 'kind' field is what the verdict in report.py branches on.
     src = "/proc/mounts"
-    raise NotImplementedError("probes.probe_root_source")
+    mounts = read_text(root, src)
+    if mounts is None:
+        return unknown(src, "mounts was not found")
+    match = re.search(r" / ")
 
 
 def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
