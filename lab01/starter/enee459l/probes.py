@@ -121,6 +121,7 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
     match = re.search(r"(?:^|\n)MemTotal:\s+(\d+)\s+kB\b", meminfo)
     if match is None:
         return unknown(src, "MemTotal was not found in meminfo")
+    # only return first match in dict output
     return {"value": int(match.group(1)), "source": src, "status": "ok"}
     
 
