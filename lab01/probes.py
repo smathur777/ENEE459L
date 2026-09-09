@@ -39,7 +39,12 @@ def read_text(root: Path, rel: str) -> str | None:
     """
     p = Path(root) / rel.lstrip("/")
     try:
-        return p.read_text(errors="replace").strip("\x00").strip()
+        # A sysfs read can return None when a sensor has no data available.
+        # Check the bytes before passing them to Python's text decoder.
+        data = p.read_bytes()
+        if data is None:
+            return None
+        return data.decode("utf-8", errors="replace").strip("\x00").strip()
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -314,10 +319,14 @@ def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
         temp = read_text(root, f"{rel}/temp")
         if temp is None:
             continue
+        try:
+            temp_c = int(temp) / 1000
+        except ValueError:
+            continue
         zones.append({
             "zone": zone.name,
             "type": read_text(root, f"{rel}/type"),
-            "temp_c": int(temp) / 1000,
+            "temp_c": temp_c,
         })
 
     if not zones:
