@@ -1,6 +1,7 @@
 """Probes — read what the machine says about itself.
 
-STUDENT STARTER. Implement every function marked with a TODO below.
+INSTRUCTOR SOLUTION. Do not distribute. The student copy of this file has the
+body of every function below replaced by `raise NotImplementedError`.
 
 Every probe takes a `root` argument and reads nothing outside it. That is not
 decoration: it is what makes this lab gradeable without twenty boards on a
@@ -21,6 +22,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+import pdb
+import json
 
 # ---------------------------------------------------------------------------
 # Small helpers. These are given to students; the exercise is the probes.
@@ -63,33 +66,60 @@ def unknown(source: str, why: str) -> dict[str, Any]:
     """
     return {"value": None, "source": source, "status": "unknown", "detail": why}
 
+# LnkSta/LnkCap lines look like:
+#   LnkSta: Speed 8GT/s, Width x4, TrErr- Train- SlotClk+ DLActive- ...
+#   LnkCap: Port #0, Speed 16GT/s, Width x4, ASPM L1, Exit Latency L1 <64us
+_SPEED_RE = re.compile(r"Speed\s+([\d.]+)GT/s")
+_WIDTH_RE = re.compile(r"Width\s+x(\d+)")
 
-# ---------------------------------------------------------------------------
-# YOUR WORK STARTS HERE.
+# PCIe generation by per-lane transfer rate. Gen3 is 8 GT/s; the Orin Nano
+# devkit's M.2 Key-M slot is wired Gen3 x4, so a Gen4 drive reporting 16 GT/s
+# capability and 8 GT/s status is behaving correctly, not underperforming.
 #
-# Eight functions below raise NotImplementedError. Replace each body. Run
-#
-#     python3 -m pytest tests/test_public.py -v
-#
-# as you go — the tests run against fake machines in tests/fixtures/, so they
-# work on your laptop before you ever touch a board.
-#
-# Two rules the tests enforce, and the graders enforce again:
-#
-#   1. Read only from `root`. Never hardcode "/". A probe that ignores its root
-#      argument cannot be tested, and a measurement nobody can test is a
-#      measurement nobody should believe.
-#   2. When you cannot determine something, return unknown(source, why). Never
-#      return 0, "", or a plausible default. `unknown` is a correct answer and
-#      it is marked as one. A fabricated 0 is not, and it is marked as that.
-# ---------------------------------------------------------------------------
+# Keyed by float, not by the string lspci printed. Keying by string means
+# deciding whether "8", "8.0" and "08" are the same rate, and the obvious
+# normalisation — stripping trailing zeros and dots — silently turns 20 into 2.
+_GEN_BY_GTS = {2.5: 1, 5.0: 2, 8.0: 3, 16.0: 4, 32.0: 5, 64.0: 6}
+
+
+def _parse_link_line(line: str) -> dict[str, Any]:
+
+    # TODO: implement this helper.
+    # Pull the speed and width out of one LnkSta: or LnkCap: line.
+    # _SPEED_RE and _WIDTH_RE above already match them.
+    # Return {'raw', 'gts', 'width', 'gen'} — map GT/s to a generation with
+    # _GEN_BY_GTS, and use None for anything the line does not state.
+    speed_match = _SPEED_RE.search(line)
+    width_match = _WIDTH_RE.search(line)
+    gts = float(speed_match.group(1)) if speed_match else None
+    # get is safer and returns none when it isn't found instead of erroring
+    gen = _GEN_BY_GTS.get(gts) if gts is not None else None
+    width = int(width_match.group(1)) if width_match else None
+    return {"raw": line, "gts": gts, "width": width, "gen": gen}
+
+
+
+def generate_interpretation_string(neg_speed, cap_speed):
+    if cap_speed > neg_speed:
+        interpretation = (
+            f"drive capable of Gen{capability['gen']}, link running at "
+            f"Gen{negotiated['gen']} — expected on this carrier board, "
+            "whose M.2 Key-M slot is wired Gen3 x4"
+        )
+    else:
+        interpretation = (
+            f"link running at its full capability, Gen{negotiated['gen']} "
+            f"x{negotiated['width']}"
+        )
+    return interpretation
+
 
 
 # ---------------------------------------------------------------------------
 # The probes.
 # ---------------------------------------------------------------------------
 
-
+## An example code.
 def probe_module_model(root: Path = Path("/")) -> dict[str, Any]:
     """Which board is this?
 
@@ -107,7 +137,7 @@ def probe_module_model(root: Path = Path("/")) -> dict[str, Any]:
     if node is None:
         return unknown(src, "/proc/device-tree/model not found")
     return {"value": node, "source": src, "status": "ok"}
-    
+
 
 
 def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
@@ -132,7 +162,7 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
         return unknown(src, "MemTotal was not found in meminfo")
     # only return first match in dict output
     return {"value": int(match.group(1)), "source": src, "status": "ok"}
-    
+
 
 
 def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
@@ -173,7 +203,7 @@ def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
             kind = "other"
         return {"status": "ok", "value": device, "source": src, "kind": kind}
     return unknown(src, "root mountpoint was not found")
-    
+
 
 
 def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
@@ -200,37 +230,6 @@ def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
     model = read_text(root, f"{src}/device/model") if present else None
     return {"value": present, "source": src, "status": "ok", "model": model}
 
-
-# LnkSta/LnkCap lines look like:
-#   LnkSta: Speed 8GT/s, Width x4, TrErr- Train- SlotClk+ DLActive- ...
-#   LnkCap: Port #0, Speed 16GT/s, Width x4, ASPM L1, Exit Latency L1 <64us
-_SPEED_RE = re.compile(r"Speed\s+([\d.]+)GT/s")
-_WIDTH_RE = re.compile(r"Width\s+x(\d+)")
-
-# PCIe generation by per-lane transfer rate. Gen3 is 8 GT/s; the Orin Nano
-# devkit's M.2 Key-M slot is wired Gen3 x4, so a Gen4 drive reporting 16 GT/s
-# capability and 8 GT/s status is behaving correctly, not underperforming.
-#
-# Keyed by float, not by the string lspci printed. Keying by string means
-# deciding whether "8", "8.0" and "08" are the same rate, and the obvious
-# normalisation — stripping trailing zeros and dots — silently turns 20 into 2.
-_GEN_BY_GTS = {2.5: 1, 5.0: 2, 8.0: 3, 16.0: 4, 32.0: 5, 64.0: 6}
-
-
-def _parse_link_line(line: str) -> dict[str, Any]:
-
-    # TODO: implement this helper.
-    # Pull the speed and width out of one LnkSta: or LnkCap: line.
-    # _SPEED_RE and _WIDTH_RE above already match them.
-    # Return {'raw', 'gts', 'width', 'gen'} — map GT/s to a generation with
-    # _GEN_BY_GTS, and use None for anything the line does not state.
-    speed_match = _SPEED_RE.search(line)
-    width_match = _WIDTH_RE.search(line)
-    gts = float(speed_match.group(1)) if speed_match else None
-    # get is safer and returns none when it isn't found instead of erroring
-    gen = _GEN_BY_GTS.get(gts) if gts is not None else None
-    width = int(width_match.group(1)) if width_match else None
-    return {"raw": line, "gts": gts, "width": width, "gen": gen}
 
 
 def probe_pcie_link(root: Path = Path("/"), lspci_output: str | None = None) -> dict[str, Any]:
@@ -290,7 +289,6 @@ def probe_pcie_link(root: Path = Path("/"), lspci_output: str | None = None) -> 
 
 
 
-
 def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
     """Every thermal zone the kernel exposes, in degrees C.
 
@@ -332,6 +330,7 @@ def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
     }
 
 
+
 def probe_power_mode(root: Path = Path("/"), nvpmodel_output: str | None = None) -> dict[str, Any]:
     """Which nvpmodel power mode is active?
 
@@ -369,3 +368,26 @@ def probe_power_mode(root: Path = Path("/"), nvpmodel_output: str | None = None)
         "status": "ok",
         "mode_id": mode_id,
     }
+
+
+
+## for debugging - uncomment the following lines for debugging.
+# if __name__ == "__main__":
+#     out = probe_power_mode()
+#     print(out)
+
+# for generating system_report.json
+if __name__ == "__main__":
+    report = {
+        "module_model": probe_module_model(),
+        "memory_total_kb": probe_memory_total_kb(),
+        "root_source": probe_root_source(),
+        "nvme_present": probe_nvme_present(),
+        "pcie_link": probe_pcie_link(),
+        "thermal_zones": probe_thermal_zones(),
+        "power_mode": probe_power_mode(),
+    }
+
+    path = "system_report.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=4)
