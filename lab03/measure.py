@@ -283,3 +283,31 @@ if __name__ == "__main__":
     path = "system_report.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=4)
+
+def is_stationary(samples: list[float]) -> dict[str, Any]:
+    source = "first vs last third median drift relative to the overall median"
+    n = len(samples)
+    if n < MIN_SAMPLES_FOR_STATIONARITY:
+        return unknown(source, "too few samples to divide into thirds")
+
+    overall_median = statistics.median(samples)
+    if overall_median <= 0:
+        return unknown(source, "the overall median is not positive")
+
+    k = n // 3
+    first_median = statistics.median(samples[:k])
+    last_median = statistics.median(samples[-k:])
+    drift = last_median - first_median
+    relative_drift = abs(drift) / overall_median
+    direction = "slower" if drift > 0 else "faster" if drift < 0 else "flat"
+
+    return measured(
+        relative_drift <= STATIONARITY_TOL,
+        source,
+        first_third_median_ms=round(first_median, 4),
+        last_third_median_ms=round(last_median, 4),
+        drift_ms=round(drift, 4),
+        drift_relative=round(relative_drift, 4),
+        direction=direction,
+        tolerance=STATIONARITY_TOL,
+    )
