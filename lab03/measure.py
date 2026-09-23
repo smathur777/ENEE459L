@@ -53,19 +53,102 @@ CPUFREQ_MAX = "sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
 # 1. The loop
 # ===========================================================================
 def run_timed_iterations(bench: Bench, repeats: int = 100) -> list[float]:
-    pass
+    samples = []
+    bench.workload.synchronize()
+    for _ in range(repeats):
+        start = bench.clock()
+        bench.workload.run()
+        bench.workload.synchronize()
+        end = bench.clock()
+        samples.append((end - start) / 1_000_000.0)
+    return samples
 
 
 def find_warmup_boundary(samples: list[float]) -> dict[str, Any]:
-    pass
+    source = (
+        f"leading prefix above (1 + {WARMUP_TOL}) x median of the run's second half"
+    )
+    if len(samples) < 4:
+        return unknown(source, "too few samples; at least 4 are required")
+
+    settled = statistics.median(samples[len(samples) // 2 :])
+    if settled <= 0:
+        return unknown(source, "the settled median must be positive")
+
+    threshold = settled * (1 + WARMUP_TOL)
+    discarded = 0
+    for sample in samples:
+        if sample <= threshold:
+            break
+        discarded += 1
+    return measured(
+        discarded,
+        source,
+        settled_rate_ms=round(settled, 4),
+        threshold_ms=round(threshold, 4),
+        tolerance=WARMUP_TOL,
+        retained=len(samples) - discarded,
+    )
 
 
 
 def summarize(samples: list[float]) -> dict[str, Any]:
-    pass
+    n = len(samples)
+    if not samples:
+        return dict.fromkeys(("mean", "std", "min", "max", "p50", "p95", "p99")) | {"n": 0}
+
+    ordered = sorted(samples)
+    result = {
+        "n": n,
+        "mean": round(statistics.fmean(ordered), 4),
+        "std": round(statistics.stdev(ordered), 4) if n > 2 else 0.0,
+        "min": round(ordered[0], 4),
+        "max": round(ordered[-1], 4),
+    }
+    for q in PERCENTILES:
+        h = (n - 1) * q / 100
+        i = int(h)
+        value = ordered[i] + (h - i) * (ordered[min(i + 1, n - 1)] - ordered[i])
+        result[f"p{q}"] = round(value, 4)
+    return result
 
 def is_multimodal(samples: list[float]) -> dict[str, Any]:
-    pass
+    source = (
+        f"widest trimmed gap >= {MULTIMODAL_GAP_RATIO}x the median gap, "
+        f"with >= {MIN_MODE_FRACTION:.0%} of samples on each side"
+    )
+    n = len(samples)
+    if n < MIN_SAMPLES_FOR_MODALITY:
+        return unknown(source, f"not enough samples; at least {MIN_SAMPLES_FOR_MODALITY} are required")
+
+    ordered = sorted(samples)
+    trim = int(n * 0.05)
+    trimmed = ordered[trim : n - trim]
+    gaps = [right - left for left, right in zip(trimmed, trimmed[1:])]
+    typical_gap = statistics.median(gaps)
+    if typical_gap <= 0:
+        return unknown(source, "timer resolution is too coarse; the median gap is not positive")
+
+    widest_gap = max(gaps)
+    ratio = widest_gap / typical_gap
+    split = trim + gaps.index(widest_gap) + 1
+    groups = (ordered[:split], ordered[split:])
+    return measured(
+        ratio >= MULTIMODAL_GAP_RATIO
+        and all(len(group) >= n * MIN_MODE_FRACTION for group in groups),
+        source,
+        gap_ratio=round(ratio, 2),
+        widest_gap_ms=round(widest_gap, 4),
+        typical_gap_ms=round(typical_gap, 5),
+        modes=[
+            {
+                "n": len(group),
+                "share": round(len(group) / n, 4),
+                "median_ms": round(statistics.median(group), 4),
+            }
+            for group in groups
+        ],
+    )
 
 # ===========================================================================
 # 7. The clock ceiling the run happened under
@@ -73,12 +156,100 @@ def is_multimodal(samples: list[float]) -> dict[str, Any]:
 
 
 def probe_power_state(bench: Bench) -> dict[str, Any]:
-    pass
+    result = bench.runner(["nvpmodel", "-q"])
+    if not result.ok or result.returncode != 0:
+        return unknown(
+            result.source,
+            result.error or result.stdout.strip()
+            or f"command exited with code {result.returncode}; check nvpmodel permissions",
+        )
+
+    findings = unknown(result.source, "NV Power Mode was not found in command output")
+    lines = result.stdout.splitlines()
+    for i, line in enumerate(lines):
+        if "NV Power Mode:" in line:
+            mode = line.split("NV Power Mode:", 1)[1].strip()
+            try:
+                mode_index = int(lines[i + 1].strip())
+            except (IndexError, ValueError):
+                findings = unknown(result.source, "power mode ID is missing or invalid")
+            else:
+                if mode:
+                    findings = measured(mode, result.source, mode_index=mode_index)
+            break
+
+    minimum = read_text(bench.telemetry, CPUFREQ_MIN)
+    maximum = read_text(bench.telemetry, CPUFREQ_MAX)
+    clock_source = f"{CPUFREQ_MIN} vs {CPUFREQ_MAX}"
+    findings["jetson_clocks"] = None
+    if minimum is None or maximum is None:
+        findings["jetson_clocks_source"] = unknown(clock_source, "CPU frequency limits could not be read")
+    else:
+        try:
+            findings["jetson_clocks"] = int(minimum) == int(maximum)
+        except ValueError:
+            findings["jetson_clocks_source"] = unknown(clock_source, "CPU frequency limits are not integers")
+        else:
+            findings["jetson_clocks_source"] = measured(
+                f"scaling_min_freq={minimum}, scaling_max_freq={maximum}", clock_source
+            )
+    return findings
 
 
 
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
-    pass
+    temperature_source = f"{THERMAL_ZONES}/*/temp"
+    temperatures = []
+    try:
+        zones = sorted((bench.telemetry / THERMAL_ZONES).glob("thermal_zone*"))
+    except OSError:
+        zones = []
+    for zone in zones:
+        relative = f"{THERMAL_ZONES}/{zone.name}"
+        raw = read_text(bench.telemetry, f"{relative}/temp")
+        if raw is None:
+            continue
+        try:
+            millidegrees = int(raw)
+        except ValueError:
+            continue
+        if millidegrees <= -1000:
+            continue
+        name = read_text(bench.telemetry, f"{relative}/type") or zone.name
+        temperatures.append((millidegrees / 1000.0, name))
+
+    if temperatures:
+        hottest, name = max(temperatures, key=lambda reading: reading[0])
+        temperature = measured(
+            hottest, temperature_source, zone=name, zones_read=len(temperatures)
+        )
+    else:
+        temperature = unknown(temperature_source, "no valid thermal zone temperatures could be read")
+
+    power_reading = read_first(bench.telemetry, POWER_RAIL_CANDIDATES)
+    if power_reading is None:
+        power = unknown(
+            " | ".join(POWER_RAIL_CANDIDATES),
+            "none of the documented INA3221 rail paths could be read",
+        )
+    else:
+        source, raw = power_reading
+        try:
+            power = measured(int(raw), source)
+        except ValueError:
+            power = unknown(source, "power reading is not an integer")
+
+    gpu_reading = read_first(bench.telemetry, GPU_LOAD_CANDIDATES)
+    if gpu_reading is None:
+        gpu = unknown(" | ".join(GPU_LOAD_CANDIDATES), "no GPU load file could be read")
+    else:
+        source, raw = gpu_reading
+        try:
+            gpu = measured(int(raw) / 10.0, source, units="per-mille / 10")
+        except ValueError:
+            gpu = unknown(source, "GPU load reading is not an integer")
+
+    return {"temperature_c": temperature, "power_mw": power, "gpu_utilization_percent": gpu}
 
 ## for debugging - uncomment the following lines for debugging.
 # if __name__ == "__main__":
