@@ -230,7 +230,7 @@ def precision_row(model_name: str, config: Mapping[str, Any],
                   tensors: Sequence[Tensor],
                   calibration_values: Sequence[float],
                   all_values: Sequence[float]) -> dict[str, Any]:
-    label = str(config.get("label") or config.get("precision") or "")
+    label = str(config.get("label") or "")
     precision = str(config.get("precision", "fp32"))
     if precision not in PRECISIONS:
         raise TensorError(
