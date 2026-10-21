@@ -217,8 +217,10 @@ def main(
     json_path = out_path / json_filename
 
     # 1. Capture frame from hardware
-    pipeline_str = gstreamer_pipeline()
-    frame_bgr = grab_frame(pipeline_str)
+    frame_bgr = cv2.imread("all_focus_s1_1.0_s2_3.0.png")
+
+    if frame_bgr is None:
+        raise RuntimeError("Failed to load image.")
 
     # 2. Save captured image to disk
     cv2.imwrite(str(img_path), frame_bgr)
