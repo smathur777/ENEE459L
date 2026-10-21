@@ -8,13 +8,13 @@
     },
     "frame_analysis": {
         "classification": "scene",
-        "classification_reason": "mean 0.3184, spread 1.0000. Exposed and structured.",
+        "classification_reason": "mean 0.3066, spread 1.0000. Exposed and structured.",
         "stats": {
             "min": 0.0,
             "max": 1.0,
-            "mean": 0.3184312932066583,
+            "mean": 0.3065782347706258,
             "spread": 1.0,
-            "sd": 0.1871974593592247,
+            "sd": 0.1774507381752955,
             "samples": 2073600.0
         }
     },
