@@ -106,9 +106,6 @@ def level_report(
         "usable": not (silent or too_hot or too_quiet),
     }
 
-
-
-
 # Edit these
 def wav_bytes(
     sample_rate: int,
@@ -141,9 +138,6 @@ def wav_bytes(
         "total_bytes": data_bytes + header_bytes,
     }
 
-
-
-
 def duration_from_bytes(
     data_bytes: int, sample_rate: int, channels: int, bit_depth: int
 ) -> dict[str, Any]:
@@ -161,9 +155,6 @@ def duration_from_bytes(
         "remainder": remainder,
         "whole": remainder == 0,
     }
-
-
-
 
 def header_consistency(
     header: dict[str, Any], audio: dict[str, Any]
@@ -203,8 +194,6 @@ def header_consistency(
         "stated_seconds": float(audio.get("seconds", 0.0)),
     }
 
-
-
 def dbfs(amplitude: float) -> float | None:
     if isinstance(amplitude, bool) or not isinstance(amplitude, (int, float)):
         raise CaptureError(f"amplitude is {amplitude!r}, which is not a number.")
@@ -223,9 +212,6 @@ def dbfs(amplitude: float) -> float | None:
 
     return 20.0 * math.log10(a)
 
-
-
-
 def bits_in_use(peak_dbfs: float | None, bit_depth: int) -> float:
     _positive_int(bit_depth, "bit_depth")
 
@@ -236,9 +222,6 @@ def bits_in_use(peak_dbfs: float | None, bit_depth: int) -> float:
         raise CaptureError(f"peak_dbfs is {peak_dbfs!r}, which is not a level.")
 
     return max(0.0, bit_depth + float(peak_dbfs) / DB_PER_BIT)
-
-
-
 
 def level_sentence(level: dict[str, Any]) -> str:
     if level["silent"]:
@@ -260,9 +243,6 @@ def level_sentence(level: dict[str, Any]) -> str:
         )
 
     return ", ".join(parts)
-
-
-
 
 def record_gaps(record: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(record, dict):
@@ -294,9 +274,6 @@ def record_gaps(record: dict[str, Any]) -> dict[str, Any]:
         ],
     }
 
-
-
-
 def record_sentence(gaps: dict[str, Any]) -> str:
     n = len(gaps["present"])
     total = n + len(gaps["missing"]) + len(gaps["blank"])
@@ -323,8 +300,6 @@ def record_sentence(gaps: dict[str, Any]) -> str:
         )
 
     return f"{n} of {total} choices are named; " + "; ".join(parts)
-
-
 
 # =====================================================================
 # Reading the WAV file & Running the analysis
